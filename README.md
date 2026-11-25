@@ -1,29 +1,24 @@
-# Travel DNA Planner — Memory-Augmented Multi-Agent Travel Assistant
+# travel-dna-planner
 
-You describe a trip in plain English ("4 days in Goa from Mumbai from 20 Dec, 2 adults, ₹50,000"). A team of AI agents then:
-- collects live data on flights, weather, hotels and things to do,
-- writes a day-by-day plan tailored to **your saved travel personality**, and
-- **checks that the plan is realistic** before showing it.
+A travel planning assistant built with LangGraph, where several agents work together to put a trip plan together. It pulls live data through MCP servers, stores each user's travel preferences in PostgreSQL, and checks every itinerary against a set of rules before it is shown.
 
-It also explains *why* each suggestion fits you, and *where* each fact came from.
+A request such as "4 days in Goa from Mumbai starting 20 Dec, 2 adults, 50k budget" returns a day-by-day plan that takes the saved preferences into account, shows where each piece of information came from, and flags anything that doesn't add up (budget, pace, weather, and so on).
 
-**Stack:** Python · LangGraph · MCP · PostgreSQL · Groq · Tavily · AviationStack · OpenWeatherMap · Streamlit.
-**Code:** one file, `travel_assistant.py`, with 22 built-in tests.
+Stack: Python, LangGraph, MCP, PostgreSQL, Groq, Tavily, AviationStack, OpenWeatherMap, Streamlit.
 
----
+## Why I built this
 
-## 1. What problem does it solve?
+Most LLM travel planners I tried had the same three problems:
 
-A plain chatbot asked to plan a trip has three problems:
-1. **It invents things:** prices, flight times, weather.
-2. **It forgets you:** you repeat "I'm vegetarian, I like a slow pace" every time.
-3. **It never checks itself:** 6 activities on a "relaxed" day, a beach walk in a storm, or a plan that blows the budget.
+- They make up details like prices, flight times and weather.
+- They don't remember anything about the user, so things like "I'm vegetarian, I prefer a slow pace" have to be repeated every time.
+- They never check their own output, which leads to six activities on a "relaxed" day, a beach walk during a storm, or a plan that is way over budget.
 
-This project fixes all three: live data through tools, long-term memory in a database, and an automatic checker.
+This project tries to fix all three. Live data comes from real APIs, preferences are stored in a database, and a rule-based checker reviews the plan before it reaches the user.
 
----
+## How it works
 
-## 2. How it works, step by step
+The workflow is a LangGraph state graph with five stages:
 
 ```
 User request (Streamlit)
@@ -31,7 +26,7 @@ User request (Streamlit)
         v
 1. INTAKE agent (LLM)
      - turns the text into structured trip details (city, dates, budget, travellers)
-     - loads the saved Travel DNA and this conversation's earlier turns (PostgreSQL)
+     - loads the saved preferences and this conversation's earlier turns (PostgreSQL)
      - missing info or past dates -> asks one question and stops (no API calls spent)
         |
         v
@@ -55,196 +50,180 @@ User request (Streamlit)
      renders the plan, saves the conversation, stores preference suggestions
 ```
 
-**Key technologies, in one line each:**
-- **LangGraph** is the "manager" connecting the agents. It holds shared *state* (the trip, the results, the plan), runs *nodes* (agents), and follows *edges* (who runs next, including the parallel step and the one-time loop back).
-- **MCP (Model Context Protocol)** is a standard "plug" for tools. Each data source runs as a separate *MCP server* that advertises its tools; our app is the *MCP client* that discovers and calls them. Three servers are used:
-  - **AviationStack server:** open-source, launched with `uvx`, runs on your PC
-  - **our own travel-tools server:** inside `travel_assistant.py`, runs on your PC
-  - **Tavily:** hosted online
-- **PostgreSQL** is long-term memory. LangGraph's *checkpointer* saves every conversation, and LangGraph's *store* saves your Travel DNA.
-- **Groq** runs the LLM (`openai/gpt-oss-120b` by default) very fast. It's used twice per plan, or three times if a revision is needed.
-- **Streamlit** provides the web interface.
+A bit more on each piece:
 
----
+- **LangGraph** holds the shared state (trip details, retrieved data, the plan, the check results) and controls the flow between agents. That includes the parallel step and the single loop back from the checker to the planner.
+- **MCP** is how the agents reach external data. Each source runs as its own MCP server, and the app acts as the client that discovers and calls their tools. There are three servers. The AviationStack one is an existing open-source server launched with `uvx`. The second is a small server I wrote (inside `travel_assistant.py`) for weather and route lookups. The third is Tavily's hosted server.
+- **PostgreSQL** stores two things: every conversation (via LangGraph's checkpointer) and each user's saved preferences (via LangGraph's store).
+- **Groq** runs the LLM. The default is `openai/gpt-oss-120b`, called twice per plan, or three times if the checker asks for a revision.
+- **Streamlit** is the frontend.
 
-## 3. Every feature explained
+## Features
 
-### 1. Travel DNA (your saved travel personality)
-**What:** a profile in the sidebar with these fields:
-- travel style
-- pace (relaxed = 3 activities a day, balanced = 4, packed = 6)
-- accommodation type
-- food
-- mobility needs
-- getting around
-- favourite activities
-- usual budget
-- things to avoid
+### Travel DNA
 
-**How it's used:** it's saved in PostgreSQL and loaded automatically for **every** new trip, so you never repeat yourself. It shapes the web searches, the planner's choices and the Reality Check.
+This is a profile filled in once from the sidebar: travel style, pace, accommodation type, food preferences, mobility needs, preferred way of getting around, favourite activities, usual budget, and things to avoid. Pace sets a daily limit: 3 activities for relaxed, 4 for balanced, 6 for packed.
 
-**Where to see it:** **Memory & assumptions** tab → "saved Travel DNA".
+It's saved in PostgreSQL and loaded automatically for every new trip, so nothing needs to be repeated. It affects what the research agent searches for, what the planner picks, and what the checker looks for. If a specific trip asks for something different (for example, a packed schedule when the profile says relaxed), the trip request wins for that trip only. The app points out the override and leaves the profile unchanged.
 
-**Rule:** what you say for a *specific trip* overrides your DNA for that trip only. The app tells you about the override, and your DNA stays unchanged.
+### Preferences are suggested, not silently saved
 
-### 2. Memory you control (suggestions, not silent saving)
-If you write "I'm vegetarian" or "I always prefer homestays" in chat, the app **does not** silently save it. It creates a **suggestion** in the sidebar, which you **Accept** or **Dismiss**. You can also:
-- delete any saved field (the x button next to it)
-- clear everything
-- turn off "Suggest DNA updates from my messages"
+If something like "I'm vegetarian" or "I always prefer homestays" comes up in the chat, it doesn't go straight into the profile. It shows up as a suggestion in the sidebar, which the user can accept or dismiss. Saved fields can be deleted one by one, the whole profile can be cleared, and suggestions from chat can be switched off altogether. I didn't want the model turning a guess into a permanent fact about someone.
 
-**Why it matters:** the AI never turns a guess into a permanent fact about you.
+### Conversation memory
 
-### 3. Conversation memory (follow-ups)
-Each trip is a conversation saved in PostgreSQL. Type "make it 3 days" or "add a beach day" and it keeps everything else (city, budget, people).
+Each trip is its own conversation, stored in PostgreSQL, so follow-ups like "make it 3 days" or "add a beach day" keep everything else (city, budget, number of people). Past trips are listed in the sidebar and are still there after restarting the app.
 
-**Two kinds of memory:**
-- **Checkpoint:** *this* trip's conversation.
-- **Travel DNA:** *you*, across all trips.
+There are two separate kinds of memory here. The checkpoint stores one trip's conversation. The profile stores the user, across all trips.
 
-Old trips appear under **Trips** in the sidebar, and they survive restarting the app.
+### Explanations for each recommendation
 
-### 4. "Why it fits you" explanations
-Every activity and stay carries a short reason ("slow morning start matches your relaxed pace") and names the DNA fields it serves. The Reality Check **rejects** a plan that claims to match a preference you don't have.
+Every activity and stay comes with a short reason, like "slow morning start to suit a relaxed pace", along with the profile fields it relates to. If the planner claims an item matches a preference the user never set, the checker rejects it.
 
-### 5. Reality Check (the plan checker)
-Plain Python rules, so the results are predictable and testable:
+### Reality Check
 
-| Check | Example problem it catches |
+This is a set of plain Python rules, so the results are predictable and easy to test. It checks:
+
+- **Dates**: the right number of days, and no days outside the trip.
+- **Pace**: too many activities for the chosen pace, overlapping time slots, or an overloaded arrival day.
+- **Budget**: activities plus the hotel (plus an airfare estimate, if the budget includes flights), plus a 10% buffer, compared with the budget. When it's over, the app works out concrete options: which items to drop, a cheaper stay, how many days would fit, or what the budget would need to be.
+- **Weather**: outdoor activities on rainy or extreme-weather days that have no backup plan.
+- **Sources**: citations to source IDs that don't exist, or prices marked as sourced without a source behind them.
+- **Preferences**: meat dishes for a vegetarian, hikes for someone with a mobility need, or anything on the avoid list.
+
+If something blocking comes up, the plan goes back to the planner once, along with the list of problems. Anything still wrong after that is shown to the user instead of being hidden.
+
+The app also shows a row of scores:
+
+| Score | What it measures |
 |---|---|
-| Dates | 3 plan days for a 4-day trip; dates outside your trip |
-| Pace | 5 activities on a "relaxed" day; overlapping times; arrival day overloaded |
-| Budget | Activities + **hotel** (+ estimated airfare) + 10% contingency over your budget. It then **calculates** alternatives: drop these items, choose a cheaper stay, shorten to N days, or raise the budget to X. |
-| Weather | An outdoor activity on a rainy or extreme day with no Plan B |
-| Sources | Citing a source ID that doesn't exist; a "verified" price with no source |
-| Preferences | Meat dishes for a vegetarian; hikes for someone with a mobility need; anything on your "avoid" list |
+| Budget | Whether estimated costs plus the buffer fit the budget |
+| Pace | Whether every day stays within the pace limit, with no overlaps |
+| Weather | Whether risky days have backup plans (n/a when the trip is beyond the forecast range) |
+| Sourced | Share of stays and activities backed by a retrieved source |
+| DNA fit | Share of activities that explain how they match the profile, minus conflicts |
+| Overall | Average of the scores above |
 
-If there's a blocking problem, the plan goes back to the planner **once** with the problem list. Anything still unresolved is shown openly, not hidden.
+Each score has a tooltip in the app with the same explanation.
 
-**The score row:**
+### Rain backup plans
 
-| Score | Meaning |
-|---|---|
-| **Budget** | 100 = fits your budget |
-| **Pace** | 100 = every day within your pace limit, no overlaps |
-| **Weather** | 100 = all risky days have a Plan B; n/a when the dates are beyond the forecast |
-| **Sourced** | % of the plan backed by real retrieved sources |
-| **DNA fit** | % of activities that explain how they suit you, minus conflicts |
-| **Overall** | The average of the scores above |
+If the forecast for a day shows a 60% or higher chance of rain, or extreme heat or cold, every outdoor activity that day needs an indoor alternative. A plan without one gets sent back by the checker.
 
-Hover the **?** next to each score in the app for the same explanation.
+### Sources and data status
 
-### 6. Rain Plan B
-When the forecast shows a ≥60% chance of rain, or extreme heat or cold, every outdoor activity that day must come with an indoor alternative. If one is missing, the Reality Check sends the plan back.
+Every piece of external information keeps its provider, link, retrieval time and the date it applies to; these are listed in the Sources tab. Costs are labelled as estimates unless a source states them. Each data source shows whether it returned results, came back empty, was unavailable (with the reason), or failed. Fares, availability, bookings and forecasts are never made up.
 
-### 7. Honest, evidence-aware answers
-Every external fact keeps its **provider, link, retrieval time and the date it applies to** (see the **Sources** tab). Costs are marked **≈ estimate** unless a source states them. Each data source reports its real status:
-- ok
-- empty
-- unavailable, with the reason
-- error
+### Feedback buttons
 
-The app never invents fares, availability, bookings or forecasts.
+Under each plan there are buttons for "Too busy", "Too relaxed" and "Too expensive". They apply to the whole plan or to a single day. "Too busy" and "Too relaxed" adjust the pace; "Too expensive" asks for costs to come down by at least 25%. The plan is regenerated from the data already fetched, so no extra API calls are made. The change can also turn into a profile suggestion, which the user can accept or not. A "Fits me" button offers to save that trip's specific preferences to the profile.
 
-### 8. Feedback buttons
-| Button | Effect |
-|---|---|
-| **Too busy** | Lowers the pace, for the whole plan or one chosen day |
-| **Too relaxed** | Raises the pace |
-| **Too expensive** | Cuts costs by at least 25% |
+### Flights
 
-The plan is redone **using the data already collected**, so no new API calls are made. The change can also become a *suggestion* for your DNA, which you approve or not. **Fits me** offers to save this trip's special preferences to your DNA.
+What's available depends on the AviationStack plan:
 
-### 9. Flights: what works on which plan
-| Your AviationStack plan | What the app does |
-|---|---|
-| **Free** (default) | Uses our MCP tool `get_route_flights_today`. It shows **which airlines fly your route today and at what times**, e.g. "IndiGo 6E 5321 dep 06:05", clearly labelled *"seen today: a guide, not a schedule for your date"*. It also checks the live status of any flight number you mention ("I'm flying AI 657"). |
-| **Basic** (paid) | Real schedules for your actual travel dates (`AVIATIONSTACK_PLAN=basic` in `.env`). |
+- **Free plan (default):** future schedules aren't available, so my MCP server has a tool, `get_route_flights_today`, that lists the airlines and departure times operating on the route today (for example, "IndiGo 6E 5321, dep 06:05"). It's labelled as a reference for which flights usually run, not a schedule for the travel date. If a flight number is mentioned ("I'm flying AI 657"), the app looks up its live status.
+- **Basic plan (paid):** real schedules for the actual travel dates. Set `AVIATIONSTACK_PLAN=basic` in `.env`.
 
-No AviationStack plan provides **fares**, so the app never shows ticket prices. The free plan allows 100 requests a month; the app reuses results within a conversation to save them.
+None of AviationStack's plans provide fares, so ticket prices are never shown. The free plan allows 100 requests a month, and results are reused within a conversation to save them.
 
-### 10. Weather
-Our own MCP server looks up the city's location, the current weather, and a day-by-day forecast for your trip dates. OpenWeatherMap's free forecast covers about **5 days ahead**. Later dates are marked "not covered" (nothing is invented), and the plan uses web sources about typical weather that month.
+### Weather
 
-### 11. Reliability and safety
-- **A service is down?** The rest still works, and you're told what's missing.
-- **The database is down?** The app runs with temporary memory and shows a warning banner.
-- **Groq's free limit is hit?** The app waits and retries automatically (up to twice) and tells you.
-- **Separate users:** each person's data is stored under their own traveller key.
-- **Secrets:** API keys live only in `.env`, which is never uploaded to GitHub.
+The weather tools geocode the destination and fetch the current conditions plus a daily forecast for the trip dates. OpenWeatherMap's free forecast only covers about 5 days ahead. Dates further out are marked as not covered, and the plan relies on web results about typical weather for that month.
 
----
+### Error handling
 
-## 4. What you need
+- If one service is down, the rest of the app keeps working and the missing part is reported.
+- If PostgreSQL is unreachable, the app falls back to in-memory storage and shows a warning that nothing will be saved.
+- If Groq's free-tier rate limit is hit, the app waits and retries, up to twice, and says so on screen.
+- Each user's data is stored under their own key.
+- API keys live only in `.env`, which is excluded from git.
 
-| What | Required? | Where | `.env` name |
+## Requirements
+
+| What | Required | Where to get it | `.env` variable |
 |---|---|---|---|
-| Python **3.10+** | | python.org | — |
-| Groq API key (free) | | https://console.groq.com/keys | `GROQ_API_KEY` |
-| PostgreSQL | Recommended | https://www.postgresql.org/download/ (Windows installer, then create a database named `travel_assistant` in pgAdmin) | `DATABASE_URL` |
+| Python 3.10+ | Yes | python.org | |
+| Groq API key (free) | Yes | https://console.groq.com/keys | `GROQ_API_KEY` |
+| PostgreSQL | Recommended | https://www.postgresql.org/download/ | `DATABASE_URL` |
 | Tavily API key (free) | Recommended | https://app.tavily.com | `TAVILY_API_KEY` |
-| OpenWeatherMap API key (free; takes 1–2 h to activate) | Recommended | https://home.openweathermap.org/api_keys | `OPENWEATHER_API_KEY` |
+| OpenWeatherMap API key (free, takes 1-2 hours to activate) | Recommended | https://home.openweathermap.org/api_keys | `OPENWEATHER_API_KEY` |
 | AviationStack API key (free) | Optional | https://aviationstack.com/signup/free | `AVIATIONSTACK_API_KEY` |
-| uv (`pip install uv`) | For flight-number lookups | — | — |
+| uv (`pip install uv`) | For flight-number lookups | | |
 
-## 5. Setup and run (Windows, VS Code terminal)
+For PostgreSQL, create an empty database called `travel_assistant` (pgAdmin works fine for this). The app creates its tables on first run.
+
+## Setup
+
+These commands are for Windows. On macOS or Linux, use `source .venv/bin/activate` and `cp` instead.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate
 pip install -r requirements.txt
 pip install uv
-copy .env.example .env          # then fill in your keys (macOS/Linux: cp)
-
-python travel_assistant.py check        # tests keys, database and all 3 MCP servers
-streamlit run travel_assistant.py       # opens the app at http://localhost:8501
+copy .env.example .env
 ```
 
-The `DATABASE_URL` format is `postgresql://postgres:YOUR_PASSWORD@localhost:5432/travel_assistant`. The app creates its tables automatically.
+Add the API keys to `.env`. The database URL looks like this:
 
-Other commands:
-- `python travel_assistant.py chat`: the same assistant in the terminal.
-- `python travel_assistant.py selftest`: 22 offline tests (`pytest travel_assistant.py` works too).
+```
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/travel_assistant
+```
 
-## 6. How to use the app
+Then:
 
-1. **Save your traveller key** (top of the sidebar). Paste it under *Use a saved key* to return later.
-2. **Fill in your Travel DNA** and click **Save**. Hover the **?** icons for help on each field.
-3. **Type a trip** in the chat box, e.g. *"4 days in Goa from Mumbai from 20 December 2026, 2 adults, ₹50,000 excluding flights"*.
-4. **Read the result:** the score row, then the **Plan**, **Reality Check**, **Sources** and **Memory & assumptions** tabs.
-5. **Adjust:** use the feedback buttons, or type a change ("make it 3 days").
-6. **New trip:** click **New trip** in the sidebar. Your DNA is applied automatically.
+```bash
+python travel_assistant.py check        # checks keys, database and all three MCP servers
+streamlit run travel_assistant.py       # starts the app at http://localhost:8501
+```
 
-## 7. Testing
+There are also two other commands:
 
-The 22 automated tests use a fake AI and fake tools, so they need no keys and no internet. One test starts **our real MCP server** as a separate program and talks to it over MCP, with a local stand-in for the weather and flight APIs. Another test uses **real PostgreSQL** when `DATABASE_URL` is reachable.
+- `python travel_assistant.py chat` runs the same assistant in the terminal.
+- `python travel_assistant.py selftest` runs the test suite. `pytest travel_assistant.py` also works.
+
+## Using the app
+
+1. Copy the traveller key shown at the top of the sidebar. Pasting it back under "Use a saved key" later restores the profile and past trips.
+2. Fill in the Travel DNA form and save it. Each field has a tooltip.
+3. Describe a trip in the chat box, e.g. "4 days in Goa from Mumbai from 20 December 2026, 2 adults, 50,000 rupees excluding flights".
+4. Look through the scores and the Plan, Reality Check, Sources and Memory tabs.
+5. Use the feedback buttons or type a change, like "make it 3 days".
+6. Click "New trip" to plan somewhere else. The profile carries over.
+
+## Tests
+
+There are 22 tests. They use a fake LLM and fake tools, so they don't need API keys or internet access. One test starts the real MCP server as a separate process and talks to it over the protocol, with a local stub standing in for the weather and flight APIs. Another runs against a real PostgreSQL database when `DATABASE_URL` is reachable.
 
 They cover:
-- Travel DNA reuse and trip overrides
+
+- profile reuse and trip-level overrides
 - suggestions staying pending until accepted
-- user isolation
-- clarifying questions (no API calls spent) and past dates
-- revision fixing problems, and revision limited to once
-- Rain Plan B
+- isolation between users
+- clarifying questions (no API calls spent)
+- rejecting past dates
+- the revision loop and its one-revision limit
+- rain backups
 - partial failures
-- follow-up memory, and feedback reusing data
-- hotel cost in the budget
+- follow-up memory and feedback reusing fetched data
+- hotel costs in the budget
 - the accessibility rule
-- parsing of route flights and Tavily results
+- parsing of flight and search results
 - the Groq rate-limit retry
 
-## 8. Known limitations
+## Limitations
 
-- No bookings, fares, or confirmed hotel prices or availability. Costs marked ≈ are AI estimates.
-- Travel times between places are the AI's estimates; there's no maps API.
-- Forecasts only cover ~5 days ahead.
-- On the free AviationStack plan, flights are "seen today" patterns, not schedules for your date.
-- Groq's free tier limits tokens per minute. Heavy use may need a short wait, and the app handles this automatically.
-- No currency conversion. One base city per trip, up to 14 days.
-- The traveller key is like a password, but there's no real login system.
+- No bookings, fares, or confirmed hotel prices or availability. Costs marked with ≈ are LLM estimates.
+- Travel times between places are estimated by the model; there's no maps API.
+- The weather forecast only covers about 5 days ahead.
+- On the free AviationStack plan, flight info is today's pattern for the route, not the schedule for the travel date.
+- Groq's free tier has a tokens-per-minute limit, so heavy use can mean a short wait. The app handles the retry.
+- No currency conversion, one base city per trip, and a maximum of 14 days.
+- The traveller key works like a password, but there's no real login system.
 
-## 9. Acknowledgements
+## Acknowledgements
 
-The concept was inspired by Aarohi's public LangGraph + MCP travel-planner tutorials ([part 1](https://github.com/codewithaarohi/AI-Travel-Planning-System-using-LangGraph), [part 2](https://github.com/codewithaarohi/AI-Travel-Planning-App-using-LangGraph-and-MCP)). This is an independent implementation. Travel DNA, consent-based memory, explanations, the Reality Check, Rain Plan B, evidence tracking, feedback and the free-plan flight alternative are original additions.
+The starting idea came from Aarohi's LangGraph + MCP travel planner tutorials ([part 1](https://github.com/codewithaarohi/AI-Travel-Planning-System-using-LangGraph), [part 2](https://github.com/codewithaarohi/AI-Travel-Planning-App-using-LangGraph-and-MCP)). This is a separate implementation. The preference profile and suggestion flow, explanations, rule-based checker, rain backups, source tracking, feedback loop and free-plan flight lookup are additions of my own.
 
-Flight-status lookups use the open-source [aviationstack-mcp](https://github.com/Pradumnasaraf/aviationstack-mcp) server (MIT).
+Flight status lookups use the open-source [aviationstack-mcp](https://github.com/Pradumnasaraf/aviationstack-mcp) server (MIT).
