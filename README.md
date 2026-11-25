@@ -212,15 +212,18 @@ They cover:
 - parsing of flight and search results
 - the Groq rate-limit retry
 
-## Limitations
+## Scope and future work
 
-- No bookings, fares, or confirmed hotel prices or availability. Costs marked with ≈ are LLM estimates.
-- Travel times between places are estimated by the model; there's no maps API.
-- The weather forecast only covers about 5 days ahead.
-- On the free AviationStack plan, flight info is today's pattern for the route, not the schedule for the travel date.
-- Groq's free tier has a tokens-per-minute limit, so heavy use can mean a short wait. The app handles the retry.
-- No currency conversion, one base city per trip, and a maximum of 14 days.
-- The traveller key works like a password, but there's no real login system.
+The assistant focuses on the planning stage of a trip: turning a rough idea into a realistic, personalised itinerary with sources attached. Booking is left to dedicated platforms, so costs in the plan are planning estimates rather than live quotes.
+
+Directions I'd like to take it next:
+
+- Live hotel and fare pricing through a booking or travel-pricing API
+- Route-aware scheduling with a maps API for travel times between stops
+- Multi-city trips and automatic currency conversion
+- Longer-range weather using climate data, beyond the current 5-day forecast
+- Full schedules for future travel dates on AviationStack's paid tier (already supported via `AVIATIONSTACK_PLAN=basic`)
+- Proper user accounts in place of the traveller key
 
 ## Acknowledgements
 
