@@ -225,8 +225,7 @@ Directions I'd like to take it next:
 - Full schedules for future travel dates on AviationStack's paid tier (already supported via `AVIATIONSTACK_PLAN=basic`)
 - Proper user accounts in place of the traveller key
 
-## Acknowledgements
+## Acknowledgement
 
-The starting idea came from Aarohi's LangGraph + MCP travel planner tutorials ([part 1](https://github.com/codewithaarohi/AI-Travel-Planning-System-using-LangGraph), [part 2](https://github.com/codewithaarohi/AI-Travel-Planning-App-using-LangGraph-and-MCP)). This is a separate implementation. The preference profile and suggestion flow, explanations, rule-based checker, rain backups, source tracking, feedback loop and free-plan flight lookup are additions of my own.
+Flight status lookups use the open-source [aviationstack-mcp](https://github.com/Pradumnasaraf/aviationstack-mcp) server (MIT license).
 
-Flight status lookups use the open-source [aviationstack-mcp](https://github.com/Pradumnasaraf/aviationstack-mcp) server (MIT).
