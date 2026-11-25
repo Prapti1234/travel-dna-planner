@@ -1,0 +1,12 @@
+# Python 3.10 or newer
+exceptiongroup>=1.2; python_version < "3.11"
+langgraph>=1.0,<2
+langgraph-checkpoint-postgres>=3.0,<4
+psycopg[binary,pool]>=3.2
+groq>=0.30
+mcp>=1.27,<2
+httpx>=0.27
+pydantic>=2.7
+python-dotenv>=1.0
+streamlit>=1.50
+pytest>=8
